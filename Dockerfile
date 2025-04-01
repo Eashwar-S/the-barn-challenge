@@ -44,6 +44,8 @@ ENV PATH="/root/nav_challenge/bin:$PATH"
 # Install Python dependencies
 RUN pip3 install defusedxml rospkg netifaces numpy scikit-learn scipy filterpy matplotlib
 
+RUN apt install python3-tk
+
 # Create ROS workspace and clone repositories
 WORKDIR /root/jackal_ws/src
 

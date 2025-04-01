@@ -7,8 +7,6 @@ from os.path import join
 import numpy as np
 import rospy
 import rospkg
-
-
 from gazebo_simulation import GazeboSimulation
 
 INIT_POSITION = [-2, 3, 1.57]  # in world frame

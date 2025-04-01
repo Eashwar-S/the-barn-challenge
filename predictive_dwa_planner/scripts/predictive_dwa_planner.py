@@ -35,9 +35,9 @@ class Config:
         self.danger_distance = 5.0
         self.frontal_danger_angle = np.pi/2    # 10 degrees 
         self.tracking_max_dist = 1.0  # Max distance for track association (m)
-        self.tracking_max_age = 0.1    # Time to keep unmatched tracks (s)
-        self.reverse_turn_rate = 1.0
-        self.reverse_speed = 1.8
+        self.tracking_max_age = 0.05    # Time to keep unmatched tracks (s)
+        self.reverse_turn_rate = 0.05
+        self.reverse_speed = 2.0
         self.max_reverse_duration = 0.2
         self.cost_to_goal_penalty = 50.0
         self.obstacle_cost_gain = 100.0
@@ -155,7 +155,7 @@ class DWA:
         self.vx_samples = 10 #6  # number of velocity samples in x direction
         self.vtheta_samples = 15 # 20  # number of angular velocity samples
         self.R = 3.0    # radius to consider obstacles [m]
-        self.horizon = 10.0
+        self.horizon = 12.0
         self.percent_speed_reduction = 0.25
         self.traj_collision_distance = 5.0
         self.goal_distance = 3.0
@@ -286,13 +286,13 @@ class DWA:
         if min_distance < 2.0 or obstacle_density > 250:  # Crowded mode
             self.sim_time = 3.0
             self.vx_samples = 15
-            self.vtheta_samples = 20
-            self.percent_speed_reduction = 0.5
+            self.vtheta_samples = 40
+            self.percent_speed_reduction = 0.3
         else:  # Free mode
             self.sim_time = 5.0
             self.vx_samples = 10
-            self.vtheta_samples = 15
-            self.percent_speed_reduction = 0.4
+            self.vtheta_samples = 30
+            self.percent_speed_reduction = 0.2
 
 
         # Get predicted obstacle positions
@@ -578,7 +578,7 @@ class DWA:
     
         robot_heading = x[2]  # Robot's heading in radians
 
-        robot_traj = self.predict_trajectory(x, x[3], x[4], a=0.5)
+        robot_traj = self.predict_trajectory(x, x[3], x[4], a=0.1)
         threshold = self.config.robot_radius + self.config.obstacle_radius + 0.5
 
 
@@ -603,7 +603,7 @@ class DWA:
                     if abs(relative_angle) <= np.deg2rad(135):
                         # Determine approach direction based on relative angle
                         # print(f'relative angle - {np.rad2deg(relative_angle)}')
-                        if -np.pi/4 - np.deg2rad(30) < relative_angle and relative_angle < np.pi/4 + np.deg2rad(30):  # [-55, 55] degrees: front
+                        if -np.pi/2 - np.deg2rad(0) < relative_angle and relative_angle < np.pi/2 + np.deg2rad(0):  # [-55, 55] degrees: front
                             approach_direction = 'front'
                         else:  # [90, 135] or [-135, -90] degrees: back
                             approach_direction = 'back'
@@ -617,7 +617,8 @@ class DWA:
         if not self.reverse_mode:
             self.reverse_mode = True
             self.reverse_duration = 0.0
-            self.reverse_turn_direction = 0.15 if np.random.rand() > 0.5 else -0.15
+            self.reverse_turn_direction = 0.1 if np.random.rand() > 0.5 else -0.1
+        
         
         v = -self.config.reverse_speed
         w = self.reverse_turn_direction * self.config.reverse_turn_rate
@@ -676,7 +677,7 @@ class DWA:
         return predicted
     
     def calc_dynamic_window(self, x):
-        vs = [self.config.min_vel_x, (1 - self.percent_speed_reduction)*self.config.max_vel_x,
+        vs = [0, (1 - self.percent_speed_reduction)*self.config.max_vel_x,
               -self.config.max_vel_theta, self.config.max_vel_theta]
         vd = [x[3] - self.config.acc_lim_x * self.sim_granularity,
               x[3] + self.config.acc_lim_x * self.sim_granularity,
@@ -730,7 +731,7 @@ class DWA:
         sector_index = min(int((relative_angle - self.angle_min) / self.sector_width), self.num_sectors - 1)
         return max(0, min(sector_index, self.num_sectors - 1))  # Clamp to valid range
 
-    def predict_trajectory(self, x_init, v, w, a=0.5):
+    def predict_trajectory(self, x_init, v, w, a=0.1):
         x = np.array(x_init)
         trajectory = np.array([x])
         time = 0
@@ -741,7 +742,7 @@ class DWA:
             # v_current = min(self.config.max_vel_x, v_current + a * self.sim_granularity)  # Accelerate
             # trajectory = np.vstack((trajectory, x))
             # time += self.sim_granularity
-            x = self.motion(x, [v_current, w], self.config.dt)
+            x = self.motion(x, [v_current, w], self.config.dt*5)
             v_current = min(self.config.max_vel_x, v_current + a * self.config.dt)  # Accelerate
             trajectory = np.vstack((trajectory, x))
             time += self.sim_granularity

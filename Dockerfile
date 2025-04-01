@@ -81,8 +81,4 @@ RUN echo "source /root/jackal_ws/devel/setup.bash" >> ~/.bashrc
 # Default command to keep the container running
 CMD ["/bin/bash"]
 
-# Instructions for running simulations
-RUN echo "To run simulations, use the following commands:" >> /root/README.txt && \
-    echo "source ../../devel/setup.sh" >> /root/README.txt && \
-    echo "python3 run.py --world_idx 0" >> /root/README.txt
-
+WORKDIR /root/jackal_ws/src/the-barn-challenge

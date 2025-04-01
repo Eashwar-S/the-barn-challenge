@@ -12,13 +12,4 @@ docker run -it --rm \
   --volume /dev/shm:/dev/shm \
   --device /dev/dri \
   --name barn_container \
-  barn_simulation_modified:latest_v1
-
-# Execute commands inside the container
-docker exec -it barn_container bash -c "
-export ROS_MASTER_URI=http://localhost:11311
-export ROS_HOSTNAME=localhost
-source devel/setup.bash
-cd src/the-barn-challenge/
-bash
-"
+  barn_simulation_modified:latest

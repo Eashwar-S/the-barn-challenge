@@ -1,4 +1,5 @@
 #!/bin/bash
+docker build -t barn_simulation_modified .
 
 # Allow X server connections from Docker
 xhost +local:docker

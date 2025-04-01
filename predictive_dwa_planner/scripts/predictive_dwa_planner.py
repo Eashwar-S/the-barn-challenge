@@ -34,13 +34,13 @@ class Config:
         # Hyperparameters to tune
         self.danger_distance = 5.0
         self.frontal_danger_angle = np.pi/2    # 10 degrees 
-        self.tracking_max_dist = 1.0  # Max distance for track association (m)
-        self.tracking_max_age = 0.05    # Time to keep unmatched tracks (s)
-        self.reverse_turn_rate = 0.05
+        self.tracking_max_dist = 0.4  # Max distance for track association (m)
+        self.tracking_max_age = 0.1    # Time to keep unmatched tracks (s)
+        self.reverse_turn_rate = 0.01
         self.reverse_speed = 2.0
         self.max_reverse_duration = 0.2
-        self.cost_to_goal_penalty = 50.0
-        self.obstacle_cost_gain = 100.0
+        self.cost_to_goal_penalty = 80.0
+        self.obstacle_cost_gain = 90.0
         self.orientation_penalty = 15.0
         self.safety_weight = 15.0
 
@@ -155,7 +155,7 @@ class DWA:
         self.vx_samples = 10 #6  # number of velocity samples in x direction
         self.vtheta_samples = 15 # 20  # number of angular velocity samples
         self.R = 3.0    # radius to consider obstacles [m]
-        self.horizon = 12.0
+        self.horizon = 10.0
         self.percent_speed_reduction = 0.25
         self.traj_collision_distance = 5.0
         self.goal_distance = 3.0
@@ -168,14 +168,16 @@ class DWA:
         self.angle_min = -2.35619449  # -135 degrees
         self.num_sectors = 9
         self.sector_width = (2.35619449 - self.angle_min) / self.num_sectors
+        self.obstacle_count_weight = 1.0  # New cost weight for current obstacles
+        self.future_obstacle_count_weight = 1.5  # New cost weight for future obstacles
 
-    def plan(self, x, goal, ob, sector_min_distances, obstacle_type):
+    def plan(self, x, goal, ob, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts, obstacle_type):
         self.current_pos = x
         """Branch to static or dynamic planning based on obstacle type."""
         if obstacle_type == "static":
             return self.plan_static(x, goal, ob)
         else:
-            return self.plan_dynamic(x, goal, ob, sector_min_distances)
+            return self.plan_dynamic(x, goal, ob, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts)
 
     """
     All function from now onwards are for DWA planner to deal
@@ -267,7 +269,7 @@ class DWA:
     with dynamic obstacles.
     """
 
-    def plan_dynamic(self, x, goal, ob, sector_min_distances):
+    def plan_dynamic(self, x, goal, ob, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts):
         """Plan for dynamic obstacles with reverse maneuver."""
         # Update tracks with new observations
         self.update_obstacle_tracks(x, ob)
@@ -284,15 +286,17 @@ class DWA:
 
         # Set dynamic parameters
         if min_distance < 2.0 or obstacle_density > 250:  # Crowded mode
-            self.sim_time = 3.0
+            self.sim_time = 2.0
+            self.horizon = 5.0
             self.vx_samples = 15
-            self.vtheta_samples = 40
-            self.percent_speed_reduction = 0.3
+            self.vtheta_samples = 20
+            self.percent_speed_reduction = 0.5
         else:  # Free mode
             self.sim_time = 5.0
+            self.horizon = 10.0
             self.vx_samples = 10
-            self.vtheta_samples = 30
-            self.percent_speed_reduction = 0.2
+            self.vtheta_samples = 10
+            self.percent_speed_reduction = 0.4
 
 
         # Get predicted obstacle positions
@@ -305,9 +309,12 @@ class DWA:
                 if min([d for d in sector_min_distances]) < self.R:
                     print(f'-------- reverse mechanism triggered ----------s')
                     return self.execute_reverse_maneuver(x)
-                
-        dw = self.calc_dynamic_window(x)
-        u, trajectory = self.calc_control_and_trajectory(x, dw, goal, predicted_obs, sector_min_distances)
+        
+        if self.direction == 'back':
+            dw = self.calc_dynamic_window(x, front=True)
+        else:
+            dw = self.calc_dynamic_window(x)
+        u, trajectory = self.calc_control_and_trajectory(x, dw, goal, predicted_obs, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts)
         return u, trajectory
     
     def trajectories_intersect(self, vehicle_traj, obstacle_traj, threshold):
@@ -579,7 +586,7 @@ class DWA:
         robot_heading = x[2]  # Robot's heading in radians
 
         robot_traj = self.predict_trajectory(x, x[3], x[4], a=0.1)
-        threshold = self.config.robot_radius + self.config.obstacle_radius + 0.5
+        threshold = self.config.robot_radius + self.config.obstacle_radius + 0.8
 
 
         for obs in pred_obs:
@@ -603,7 +610,7 @@ class DWA:
                     if abs(relative_angle) <= np.deg2rad(135):
                         # Determine approach direction based on relative angle
                         # print(f'relative angle - {np.rad2deg(relative_angle)}')
-                        if -np.pi/2 - np.deg2rad(0) < relative_angle and relative_angle < np.pi/2 + np.deg2rad(0):  # [-55, 55] degrees: front
+                        if -np.pi/2 < relative_angle and relative_angle < np.pi/2:  # [-55, 55] degrees: front
                             approach_direction = 'front'
                         else:  # [90, 135] or [-135, -90] degrees: back
                             approach_direction = 'back'
@@ -617,8 +624,7 @@ class DWA:
         if not self.reverse_mode:
             self.reverse_mode = True
             self.reverse_duration = 0.0
-            self.reverse_turn_direction = 0.1 if np.random.rand() > 0.5 else -0.1
-        
+            self.reverse_turn_direction = 0.0# if np.random.rand() > 0.5 else -0.25
         
         v = -self.config.reverse_speed
         w = self.reverse_turn_direction * self.config.reverse_turn_rate
@@ -676,9 +682,13 @@ class DWA:
             predicted.append(np.array(traj))
         return predicted
     
-    def calc_dynamic_window(self, x):
-        vs = [0, (1 - self.percent_speed_reduction)*self.config.max_vel_x,
-              -self.config.max_vel_theta, self.config.max_vel_theta]
+    def calc_dynamic_window(self, x, front=False):
+        if front:
+            vs = [0.8, self.config.max_vel_x,
+                  0, self.config.max_vel_theta]
+        else:
+            vs = [0, (1 - self.percent_speed_reduction)*self.config.max_vel_x,
+                -self.config.max_vel_theta, self.config.max_vel_theta]
         vd = [x[3] - self.config.acc_lim_x * self.sim_granularity,
               x[3] + self.config.acc_lim_x * self.sim_granularity,
               x[4] - self.config.acc_lim_theta * self.sim_granularity,
@@ -694,7 +704,7 @@ class DWA:
         print(f'control inputs range - {dw}')
         return dw
 
-    def calc_control_and_trajectory(self, x, dw, goal, ob, sector_min_distances):
+    def calc_control_and_trajectory(self, x, dw, goal, ob, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts):
         x_init = x[:]
         min_cost = float('inf')
         best_u = [0.0, 0.0]
@@ -709,7 +719,9 @@ class DWA:
                 relative_angle = self.normalize_angle(global_angle - x_init[2])
                 sector_index = self.get_sector_index(relative_angle)
                 sector_min_distance = sector_min_distances[sector_index]
-                cost = self.calc_cost(trajectory, goal, ob, sector_min_distance)
+                obstacle_count = sector_obstacle_counts[sector_index]
+                future_obstacle_count = sector_future_obstacle_counts[sector_index]
+                cost = self.calc_cost(trajectory, goal, ob, sector_min_distance, obstacle_count, future_obstacle_count)
                 if cost < min_cost:
                     min_cost = cost
                     best_u = [v, w]
@@ -718,11 +730,11 @@ class DWA:
         if min_cost == float('inf'):
             if self.direction is not None:
                 if self.direction == 'front':
-                    best_u = [-0.5, 0]
+                    best_u = [-2.0, 0]
                 else:
-                    best_u = [1.0, 0]
+                    best_u = [2.0, 0]
             else:
-                best_u = [0, 0]
+                best_u = [1.0, 0]
 
         return best_u, best_trajectory
 
@@ -731,7 +743,7 @@ class DWA:
         sector_index = min(int((relative_angle - self.angle_min) / self.sector_width), self.num_sectors - 1)
         return max(0, min(sector_index, self.num_sectors - 1))  # Clamp to valid range
 
-    def predict_trajectory(self, x_init, v, w, a=0.1):
+    def predict_trajectory(self, x_init, v, w, a=0.5):
         x = np.array(x_init)
         trajectory = np.array([x])
         time = 0
@@ -757,7 +769,7 @@ class DWA:
         return x
 
 
-    def calc_cost(self, trajectory, goal, ob, sector_min_distance):
+    def calc_cost(self, trajectory, goal, ob, sector_min_distance, obstacle_count, future_obstacle_count):
         goal_cost = self.calc_to_goal_cost(trajectory, goal)
         obs_cost = self.calc_obstacle_cost(trajectory, ob)
 
@@ -766,6 +778,10 @@ class DWA:
         # Safety cost
         # safety_cost = self.calc_safety_cost(trajectory, ob)
         direction_cost = -1.0 * sector_min_distance  # Favor farther obstacles
+        obstacle_count_cost = self.obstacle_count_weight * obstacle_count
+        future_obstacle_count_cost = self.future_obstacle_count_weight * future_obstacle_count
+        # print(f'obstacle count - {obstacle_count}')
+        # print(f'future obstacle count - {future_obstacle_count}')
         # path_cost = self.config.pdist_scale * self.calc_path_cost(trajectory)  # New method to calculate path following cost
         # print(f'obstacle cost - {self.config.obstacle_cost_gain *obs_cost}')
         # print(f'goal cost - {self.config.cost_to_goal_penalty * goal_cost}')
@@ -774,9 +790,10 @@ class DWA:
         return self.config.cost_to_goal_penalty * goal_cost +\
                self.config.obstacle_cost_gain *obs_cost +\
                self.config.orientation_penalty*psi_diff +\
-               direction_cost
-            #    min(self.config.safety_weight*safety_cost, 10.0) +\
-            #    direction_cost#+ path_cost
+               direction_cost +\
+               obstacle_count_cost #+\
+            #    future_obstacle_count_cost
+            
 
     def calc_to_goal_cost(self, trajectory, goal):
         dx = goal[0] - trajectory[-1, 0]
@@ -802,8 +819,8 @@ class DWA:
                     dy = robot_future_pos[1] - obs_future_pos[1]
                     distance = np.hypot(dx, dy)
                     # Check for collision at this time step
-                    if distance <= (self.config.robot_radius + self.config.obstacle_radius) + 0.2:
-                        return 1e6  # Collision detected
+                    if distance <= (self.config.robot_radius + self.config.obstacle_radius) + 0.5:
+                        return float('inf')  # Collision detected
                     min_r = min(min_r, distance)
         # Return cost based on closest approach if no collision
         return 1.0 / min_r if min_r < float('inf') else 0.0

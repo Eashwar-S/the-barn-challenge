@@ -19,7 +19,7 @@ OBSTACLE_MOVEMENT_THRESHOLD = 0.01  # Meters, threshold to detect movement
 NUM_LASER_SAMPLES = 300
 PLOT_FIGURE = False
 
-def process_laser_scan(odom, laser):
+def process_laser_scan(odom, laser, dwa):
     """Convert laser scan to global obstacle positions."""
     obstacles = []
     angle_min = -2.35619449  # -135 degrees in radians
@@ -33,6 +33,8 @@ def process_laser_scan(odom, laser):
     num_sectors = 9
     sector_width = (angle_max - angle_min) / num_sectors
     sector_min_distances = [float('inf')] * num_sectors
+    sector_obstacle_counts = [0] * num_sectors
+    sector_future_obstacle_counts = [0] * num_sectors
 
     for i, d in enumerate(sampled_laser):
         if np.isinf(d) or np.isnan(d):
@@ -46,8 +48,22 @@ def process_laser_scan(odom, laser):
         # Assign to sector and update minimum distance
         sector_index = min(int((angle - angle_min) / sector_width), num_sectors - 1)
         sector_min_distances[sector_index] = min(sector_min_distances[sector_index], d)
+        sector_obstacle_counts[sector_index] += 1
 
-    return obstacles, sector_min_distances
+    # Predict future obstacle positions and count them
+    predicted_obs = dwa.track_obstacle_trajectories()
+    for obs_traj in predicted_obs:
+        for future_pos in obs_traj:
+            dx = future_pos[0] - odom[0]
+            dy = future_pos[1] - odom[1]
+            angle = np.arctan2(dy, dx) - odom[2]
+            angle = (angle + np.pi) % (2 * np.pi) - np.pi  # Normalize to [-pi, pi]
+            if angle < angle_min or angle > angle_max:
+                continue  # Outside laser scan range
+            sector_index = min(int((angle - angle_min) / sector_width), num_sectors - 1)
+            sector_future_obstacle_counts[sector_index] += 1
+
+    return obstacles, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts
 
 def check_obstacle_movement(prev_obs, current_obs):
     """Check if obstacles moved beyond the threshold."""
@@ -57,7 +73,7 @@ def check_obstacle_movement(prev_obs, current_obs):
 
     return np.max(distances) > OBSTACLE_MOVEMENT_THRESHOLD
 
-def determine_obstacle_type(robot, steps=OBSTACLE_TYPE_DETERMINATION_STEPS):
+def determine_obstacle_type(robot, dwa, steps=OBSTACLE_TYPE_DETERMINATION_STEPS):
     """Determine if obstacles are static or dynamic by comparing laser scans."""
     prev_obstacles = None
     i = 0
@@ -66,7 +82,7 @@ def determine_obstacle_type(robot, steps=OBSTACLE_TYPE_DETERMINATION_STEPS):
         if laser is None:
             rospy.sleep(0.1)
         else:
-            obstacles, _ = process_laser_scan(robot.odom, laser)
+            obstacles, _, _, _ = process_laser_scan(robot.odom, laser, dwa)
             if prev_obstacles is not None:
                 if check_obstacle_movement(prev_obstacles, obstacles):
                     return "dynamic"
@@ -108,6 +124,7 @@ def centroid_code(current_obs, dwa):
                 centroids.append(np.array([center_x, center_y]))
     return np.array(centroids)
 
+# for plotting
 def track_obstacle_trajectories(tracked_obstacles):
     """Predict future trajectories of tracked obstacles.
     
@@ -154,15 +171,17 @@ if __name__ == '__main__':
 
     rate = rospy.Rate(CONTROL_FREQ)
 
-    for _ in range(2):
-        _ = determine_obstacle_type(robot)
-        rate.sleep()
-    # Determine obstacle type
-    obstacle_type = determine_obstacle_type(robot)
-
     # Initialize the DWA planner
     dwa_planner_config = Config()
-    dwa = DWA(dwa_planner_config)  
+    dwa = DWA(dwa_planner_config)
+
+
+    for _ in range(2):
+        _ = determine_obstacle_type(robot, dwa)
+        rate.sleep()
+    # Determine obstacle type
+    obstacle_type = determine_obstacle_type(robot, dwa)
+  
 
     # Initialize Matplotlib Plot
     if PLOT_FIGURE:
@@ -192,13 +211,13 @@ if __name__ == '__main__':
         local_goal = np.array([local_goal_pos[0], local_goal_pos[1], yaw_to_goal], np.float32)
 
         # Process the laser scan to extract obstacle positions in the global frame
-        obstacles, sector_min_distances  = process_laser_scan(current_state, robot.laser)
+        obstacles, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts  = process_laser_scan(current_state, robot.laser, dwa)
         
         if obstacle_type == 'dynamic':
-            u, traj = dwa.plan(current_state, final_goal, obstacles, sector_min_distances, obstacle_type)  # For dynamic obstacles
+            u, traj = dwa.plan(current_state, final_goal, obstacles, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts, obstacle_type)  # For dynamic obstacles
 
         else:
-            u, traj = dwa.plan(current_state, local_goal, obstacles, sector_min_distances, obstacle_type)  # For static obstacles
+            u, traj = dwa.plan(current_state, local_goal, obstacles, sector_min_distances, sector_obstacle_counts, sector_future_obstacle_counts, obstacle_type)  # For static obstacles
          
         v, w = u
 

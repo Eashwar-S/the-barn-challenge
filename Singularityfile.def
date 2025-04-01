@@ -3,11 +3,11 @@ From: ubuntu:18.04
 
 
 %setup
-    mkdir -p root/jackal_ws/src
+    mkdir -p jackal_ws/src
 
 
 %files
-    /home/eashwar/Desktop/the-barn-challenge /root/jackal_ws/src/
+    . jackal_ws/src/the-barn-challenge
 
 %post
     export DEBIAN_FRONTEND=noninteractive
@@ -30,7 +30,7 @@ From: ubuntu:18.04
     apt-get update
     apt-get install -y python3 python3-pip
     pip3 install defusedxml rospkg netifaces numpy scikit-learn scipy filterpy matplotlib
-    cd root/jackal_ws/src
+    cd jackal_ws/src
     git clone https://github.com/jackal/jackal.git --branch melodic-devel
     git clone https://github.com/jackal/jackal_simulator.git --branch melodic-devel
     git clone https://github.com/jackal/jackal_desktop.git --branch melodic-devel

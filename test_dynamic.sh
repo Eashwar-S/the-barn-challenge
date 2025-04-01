@@ -2,7 +2,7 @@
 for i in {300..359} ; do
     for j in {1..10} ; do            
         # run the test
-        python3 run.py --world_idx $i
+        python3 run_predictive_dwa.py --world_idx $i
         sleep 5
     done
 done

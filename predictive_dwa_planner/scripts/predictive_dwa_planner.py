@@ -20,7 +20,6 @@ class Config:
         self.xy_goal_tolerance = 0.25  # distance to goal considered as reached [m]
         self.yaw_goal_tolerance = 0.157  # angle to goal considered as reached [rad]
         
-        
         # Trajectory Scoring Parameters
         self.pdist_scale = 0.75  # weighting for how much to follow the global path
         
@@ -52,30 +51,6 @@ class Config:
         self.obstacle_cost_gain_static = 80.0
         self.orientation_penalty_static = 5.0
         self.safety_weight_static = 1.5
-
-"""
-  distance based tracking - unable to keep up with obstacles
-"""
-# class TrackedObstacle:
-#     def __init__(self, pos, timestamp, obstacle_id):
-#         self.id = obstacle_id
-#         self.positions = [pos]  # [(x1, y1), (x2, y2), ...]
-#         self.timestamps = [timestamp]
-#         self.velocity = (0.0, 0.0)  # (vx, vy)
-    
-#     def update(self, new_pos, new_timestamp):
-#         self.positions.append(new_pos)
-#         self.timestamps.append(new_timestamp)
-        
-#         # Update velocity if we have at least 2 observations
-#         if len(self.positions) >= 2:
-#             dt = new_timestamp - self.timestamps[-2]
-#             dx = new_pos[0] - self.positions[-2][0]
-#             dy = new_pos[1] - self.positions[-2][1]
-#             if dt > 0:
-#                 self.velocity = (dx/dt, dy/dt)
-#             else:
-#                 self.velocity = (0.0, 0.0)
 
 
 class TrackedObstacle:
@@ -328,83 +303,10 @@ class DWA:
             return np.any(distances < threshold)
         else:
             # Dynamic obstacle: check distances at corresponding time steps
-            # Assumes obstacle_traj matches vehicle_future in length
             distances = np.hypot(vehicle_future[:, 0] - obstacle_traj[:, 0], 
                                 vehicle_future[:, 1] - obstacle_traj[:, 1])
             return np.any(distances < threshold)
 
-
-    # def update_obstacle_tracks(self, x, current_obs):
-    #     """
-    #     Update tracked obstacles using global-frame laser points.
-    #     x: vehicle state [x, y, theta, ...]
-    #     current_obs: list of [x_global, y_global] points from process_laser_scan
-    #     """
-    #     obs_array = np.array(current_obs)
-    #     if len(obs_array) == 0:
-    #         return
-
-    #     # Cluster points with DBSCAN
-    #     clustering = DBSCAN(eps=0.6, min_samples=3).fit(obs_array)
-    #     labels = clustering.labels_
-    #     unique_labels = set(labels) - {-1}  # Exclude noise
-
-    #     clustered_obs = {}
-    #     for label in unique_labels:
-    #         cluster_points = obs_array[labels == label]
-    #         if len(cluster_points) >= 3:  # Need at least 3 points for circle fitting
-    #             center_x, center_y, r = self.fit_circle_to_points(cluster_points)
-    #             if r <= 0.6:
-    #                 clustered_obs[label] = [center_x, center_y]
-    #                 # print(f'centroid - {[center_x, center_y]}, radius - {r}')
-        
-    #     # Predict vehicle trajectory
-    #     vehicle_traj = self.predict_trajectory(x, x[3], x[4])  # Assuming speed, steering
-
-    #     # Update or create tracks
-    #     threatening_ids = set()
-    #     for o_id, tracked in self.tracked_obstacles.items():
-    #         # Predict obstacle trajectory using its latest position and velocity
-    #         num_steps = len(vehicle_traj) - 1  # Match future steps
-    #         times = np.arange(1, num_steps + 1) * self.sim_granularity
-    #         pos = np.array(tracked.positions[-1])  # Latest position
-    #         vel = np.array(tracked.velocity)       # Velocity estimate
-    #         obstacle_traj = pos + np.outer(times, vel)  # Linear prediction
-    #         if self.trajectories_intersect(vehicle_traj, obstacle_traj, self.traj_collision_distance):
-    #             threatening_ids.add(o_id)
-
-    #     updated_ids = set()
-    #     for label, center in clustered_obs.items():
-    #         closest_id, min_dist = None, float('inf')
-    #         for o_id in threatening_ids:
-    #             tracked = self.tracked_obstacles[o_id]
-    #             distance = np.hypot(center[0] - tracked.positions[-1][0], 
-    #                                 center[1] - tracked.positions[-1][1])
-    #             if distance < min_dist and distance < self.config.tracking_max_dist:
-    #                 closest_id = o_id
-    #                 min_dist = distance
-    #         if closest_id is not None:
-    #             self.tracked_obstacles[closest_id].update(center, self.current_time)
-    #             updated_ids.add(closest_id)
-    #         else:
-    #             obs_pos = np.array([center])
-    #             if self.trajectories_intersect(vehicle_traj, obs_pos, self.R):
-    #                 new_id = self.next_obstacle_id
-    #                 self.tracked_obstacles[new_id] = TrackedObstacle(
-    #                     center, self.current_time, new_id
-    #                 )
-    #                 self.next_obstacle_id += 1
-    #                 updated_ids.add(new_id)
-        
-    #     stale_ids = []
-    #     for o_id, tracked in self.tracked_obstacles.items():
-    #         if o_id not in updated_ids:
-    #             if self.current_time - tracked.timestamps[-1] > self.config.tracking_max_age:
-    #                 stale_ids.append(o_id)
-    #     for o_id in stale_ids:
-    #         del self.tracked_obstacles[o_id]
-    #     print(f'-----------Tracked {len(self.tracked_obstacles)} obstacles-------------')
-    #     self.current_time += self.config.dt
 
     """
     Kalman filter without threatening id logic
@@ -482,96 +384,9 @@ class DWA:
         print(f'-----------Tracked {len(self.tracked_obstacles)} obstacles-------------')
         self.current_time += self.config.dt
 
-    # def update_obstacle_tracks(self, x, current_obs):
-    #     """
-    #     Update tracked obstacles using global-frame laser points.
-
-    #     Args:
-    #         x: Vehicle state [x, y, theta, speed, steering, ...]
-    #         current_obs: List of [x_global, y_global] points from process_laser_scan
-    #     """
-    #     obs_array = np.array(current_obs)
-    #     if len(obs_array) == 0:
-    #         return
-
-    #     # Cluster points with DBSCAN
-    #     clustering = DBSCAN(eps=0.6, min_samples=3).fit(obs_array)
-    #     labels = clustering.labels_
-    #     unique_labels = set(labels) - {-1}  # Exclude noise
-
-    #     clustered_obs = {}
-    #     for label in unique_labels:
-    #         cluster_points = obs_array[labels == label]
-    #         if len(cluster_points) >= 3:  # Need at least 3 points for circle fitting
-    #             center_x, center_y, r = self.fit_circle_to_points(cluster_points)
-    #             if r <= 0.6:
-    #                 clustered_obs[label] = [center_x, center_y]
-
-    #     # Predict vehicle trajectory
-    #     vehicle_traj = self.predict_trajectory(x, x[3], x[4])  # Assuming speed, steering
-
-    #     # Update or create tracks with Kalman filters
-    #     threatening_ids = set()
-    #     for o_id, tracked in self.tracked_obstacles.items():
-    #         # Predict obstacle trajectory using Kalman filter
-    #         num_steps = len(vehicle_traj) - 1  # Match vehicle trajectory steps
-    #         obstacle_traj = []
-    #         kf_copy = self.copy_kalman_filter(tracked.kf)  # Avoid modifying original filter
-    #         for _ in range(num_steps):
-    #             kf_copy.predict()
-    #             obstacle_traj.append(kf_copy.x[:2].copy())  # Append [x, y] position
-    #         obstacle_traj = np.array(obstacle_traj)
-
-    #         # Check for collision threat
-    #         if self.trajectories_intersect(vehicle_traj, obstacle_traj, self.traj_collision_distance):
-    #             threatening_ids.add(o_id)
-
-    #     updated_ids = set()
-    #     for label, center in clustered_obs.items():
-    #         closest_id, min_dist = None, float('inf')
-    #         for o_id in threatening_ids:
-    #             tracked = self.tracked_obstacles[o_id]
-    #             distance = np.hypot(center[0] - tracked.kf.x[0], 
-    #                                 center[1] - tracked.kf.x[1])
-    #             if distance < min_dist and distance < self.config.tracking_max_dist:
-    #                 closest_id = o_id
-    #                 min_dist = distance
-    #         if closest_id is not None:
-    #             # Update Kalman filter with new measurement
-    #             self.tracked_obstacles[closest_id].update(center, self.current_time)
-    #             updated_ids.add(closest_id)
-    #         else:
-    #             # Check if unassigned obstacle is a threat
-    #             obs_pos = np.array([center])
-    #             if self.trajectories_intersect(vehicle_traj, obs_pos, self.R):
-    #                 new_id = self.next_obstacle_id
-    #                 self.tracked_obstacles[new_id] = TrackedObstacle(
-    #                     center, self.current_time, new_id, self.config.dt
-    #                 )
-    #                 self.next_obstacle_id += 1
-    #                 updated_ids.add(new_id)
-
-    #     # Remove stale tracks
-    #     stale_ids = []
-    #     for o_id, tracked in self.tracked_obstacles.items():
-    #         if o_id not in updated_ids:
-    #             if self.current_time - tracked.timestamps[-1] > self.config.tracking_max_age:
-    #                 stale_ids.append(o_id)
-    #     for o_id in stale_ids:
-    #         del self.tracked_obstacles[o_id]
-
-    #     print(f'-----------Tracked {len(self.tracked_obstacles)} obstacles-------------')
-    #     self.current_time += self.config.dt
 
     def copy_kalman_filter(self, kf):
-        """
-        Create a copy of the Kalman filter to predict trajectories without modifying the original.
-
-        Args:
-            kf: Original KalmanFilter instance
-        Returns:
-            kf_copy: A new KalmanFilter instance with copied parameters
-        """
+        
         kf_copy = KalmanFilter(dim_x=4, dim_z=2)  # Assuming 4D state [x, y, vx, vy], 2D measurement [x, y]
         kf_copy.x = kf.x.copy()  # State vector
         kf_copy.P = kf.P.copy()  # Covariance matrix
@@ -638,20 +453,6 @@ class DWA:
         trajectory = self.predict_trajectory(x, v, w)
         return [v, w], trajectory
 
-
-    # def track_obstacle_trajectories(self):
-    #     num_steps = int(self.horizon / self.sim_granularity) + 1
-    #     times = np.arange(1, num_steps + 1) * self.config.dt
-    #     predicted = []
-    #     for o_id, tracked in self.tracked_obstacles.items():
-    #         if len(tracked.positions) < 2:
-    #             continue
-    #         pos = np.array(tracked.positions[-1])
-    #         vel = np.array(tracked.velocity)
-    #         future_pos = pos + np.outer(times, vel)  # Vectorized prediction
-    #         predicted.append(future_pos)
-    #     return predicted    
-
     def track_obstacle_trajectories(self):
         """Predict future trajectories of tracked obstacles.
         
@@ -693,11 +494,6 @@ class DWA:
               x[3] + self.config.acc_lim_x * self.sim_granularity,
               x[4] - self.config.acc_lim_theta * self.sim_granularity,
               x[4] + self.config.acc_lim_theta * self.sim_granularity]
-        
-        # vd = [x[3] - self.config.acc_lim_x * self.config.dt,
-        #       x[3] + self.config.acc_lim_x * self.config.dt,
-        #       x[4] - self.config.acc_lim_theta * self.config.dt,
-        #       x[4] + self.config.acc_lim_theta * self.config.dt]
 
         dw = [max(vs[0], vd[0]), min(vs[1], vd[1]),
               max(vs[2], vd[2]), min(vs[3], vd[3])]
@@ -749,11 +545,7 @@ class DWA:
         time = 0
         v_current = v
         while time <= self.horizon:
-            # x = self.motion(x, [v, w], self.sim_granularity)
-            # x = self.motion(x, [v_current, w], self.sim_granularity)
-            # v_current = min(self.config.max_vel_x, v_current + a * self.sim_granularity)  # Accelerate
-            # trajectory = np.vstack((trajectory, x))
-            # time += self.sim_granularity
+        
             x = self.motion(x, [v_current, w], self.config.dt*5)
             v_current = min(self.config.max_vel_x, v_current + a * self.config.dt)  # Accelerate
             trajectory = np.vstack((trajectory, x))
@@ -775,18 +567,11 @@ class DWA:
 
         # Orientation cost
         psi_diff = abs(self.normalize_angle(trajectory[-1, 2] - goal[2]))
-        # Safety cost
-        # safety_cost = self.calc_safety_cost(trajectory, ob)
+       
         direction_cost = -1.0 * sector_min_distance  # Favor farther obstacles
         obstacle_count_cost = self.obstacle_count_weight * obstacle_count
         future_obstacle_count_cost = self.future_obstacle_count_weight * future_obstacle_count
-        # print(f'obstacle count - {obstacle_count}')
-        # print(f'future obstacle count - {future_obstacle_count}')
-        # path_cost = self.config.pdist_scale * self.calc_path_cost(trajectory)  # New method to calculate path following cost
-        # print(f'obstacle cost - {self.config.obstacle_cost_gain *obs_cost}')
-        # print(f'goal cost - {self.config.cost_to_goal_penalty * goal_cost}')
-        # print(f'orientation cost - {self.config.orientation_penalty*psi_diff}')
-        # print(f'safety cost - {self.config.safety_weight*safety_cost}')
+        
         return self.config.cost_to_goal_penalty * goal_cost +\
                self.config.obstacle_cost_gain *obs_cost +\
                self.config.orientation_penalty*psi_diff +\
